@@ -1,4 +1,4 @@
-name: Linux RDP (Stable LXDE)
+name: Linux RDP (ULTIMATE FIX)
 
 on:
   workflow_dispatch:
@@ -14,30 +14,23 @@ jobs:
           sudo apt-get update -y
           sudo apt-get upgrade -y
 
-      - name: Install LXDE Desktop + XRDP
+      - name: Install LXDE + XRDP (Fixed)
         run: |
           sudo apt-get install -y lxde-core lxterminal xrdp dbus-x11
 
-          # Clean XRDP startup (IMPORTANT FIX)
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
-#!/bin/sh
-unset DBUS_SESSION_BUS_ADDRESS
-unset XDG_RUNTIME_DIR
-exec startlxde
-EOF'
+          # FIX 1: Proper session file for user
+          echo "startlxde" > /home/runner/.xsession
 
-          sudo chmod +x /etc/xrdp/startwm.sh
+          # FIX 2: Force XRDP to use LXDE correctly
+          sudo sed -i 's/^test -x/#&/' /etc/xrdp/startwm.sh
+          sudo sed -i 's/^exec/#&/' /etc/xrdp/startwm.sh
+          echo "startlxde" | sudo tee -a /etc/xrdp/startwm.sh
 
-          # Restart XRDP
-          sudo systemctl daemon-reexec
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
-
-          # Fix permission
+          # FIX 3: Permissions
           sudo adduser xrdp ssl-cert
 
-          # Open port
-          sudo ufw allow 3389 || true
+          # Restart XRDP
+          sudo systemctl restart xrdp
 
       - name: Create RDP User
         run: |
@@ -46,6 +39,10 @@ EOF'
           sudo useradd -m rdpuser
           echo "rdpuser:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
+
+          # IMPORTANT FIX: give home session
+          echo "startlxde" | sudo tee /home/rdpuser/.xsession
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
           echo "RDP_USER=rdpuser" >> $GITHUB_ENV
           echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
@@ -65,27 +62,19 @@ EOF'
             sleep 5
           done
 
-          if [ -z "$TS_IP" ]; then
-            echo "❌ Failed to get Tailscale IP"
-            exit 1
-          fi
-
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Show RDP Info
+      - name: Show Info
         run: |
-          echo ""
-          echo "=========== LINUX RDP ==========="
-          echo "IP       : $TAILSCALE_IP"
-          echo "Port     : 3389"
-          echo "Username : $RDP_USER"
-          echo "Password : $RDP_PASS"
-          echo "================================="
-          echo ""
+          echo "=========== RDP ==========="
+          echo "IP: $TAILSCALE_IP"
+          echo "User: $RDP_USER"
+          echo "Pass: $RDP_PASS"
+          echo "==========================="
 
-      - name: Keep Session Alive
+      - name: Keep Alive
         run: |
           while true; do
-            echo "[$(date)] RDP running..."
+            echo "Running..."
             sleep 300
           done
