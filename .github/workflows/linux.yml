@@ -1,0 +1,93 @@
+name: Linux RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  linux-rdp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Update System
+        run: |
+          sudo apt-get update -y
+          sudo apt-get upgrade -y
+
+      - name: Install Desktop Environment (XFCE) + XRDP
+        run: |
+          sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11
+
+          # Set XFCE as default session
+          echo "startxfce4" > ~/.xsession
+          sudo cp ~/.xsession /etc/skel/.xsession
+
+          # Start and enable XRDP
+          sudo systemctl enable xrdp
+          sudo systemctl restart xrdp
+
+          # Add xrdp user to ssl-cert group (fix black screen issue)
+          sudo adduser xrdp ssl-cert
+
+          # Open firewall port
+          sudo ufw allow 3389 || true
+
+      - name: Create RDP User with Secure Password
+        run: |
+          PASSWORD=$(openssl rand -base64 16)
+          
+          sudo useradd -m rdpuser
+          echo "rdpuser:$PASSWORD" | sudo chpasswd
+          sudo usermod -aG sudo rdpuser
+
+          echo "RDP_USER=rdpuser" >> $GITHUB_ENV
+          echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
+
+          id rdpuser || (echo "User creation failed" && exit 1)
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Establish Tailscale Connection
+        run: |
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
+            --hostname=gh-linux-${{ github.run_id }}
+
+          # Wait for IP
+          TS_IP=""
+          for i in {1..10}; do
+            TS_IP=$(tailscale ip -4 2>/dev/null)
+            [ -n "$TS_IP" ] && break
+            sleep 5
+          done
+
+          if [ -z "$TS_IP" ]; then
+            echo "Tailscale IP not assigned"
+            exit 1
+          fi
+
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+
+      - name: Verify RDP Port
+        run: |
+          echo "Checking RDP port..."
+          nc -zv $TAILSCALE_IP 3389 || echo "Port check skipped (normal on GH runners)"
+
+      - name: Display RDP Credentials
+        run: |
+          echo ""
+          echo "=========== LINUX RDP ACCESS ==========="
+          echo "Address  : $TAILSCALE_IP"
+          echo "Port     : 3389"
+          echo "Username : $RDP_USER"
+          echo "Password : $RDP_PASS"
+          echo "========================================"
+          echo ""
+
+      - name: Keep Session Alive
+        run: |
+          while true; do
+            echo "[$(date)] Linux RDP Active..."
+            sleep 300
+          done
