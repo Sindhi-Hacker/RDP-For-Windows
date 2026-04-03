@@ -1,4 +1,4 @@
-name: Linux RDP (Fixed)
+name: Linux RDP (Stable LXDE)
 
 on:
   workflow_dispatch:
@@ -14,29 +14,32 @@ jobs:
           sudo apt-get update -y
           sudo apt-get upgrade -y
 
-      - name: Install Desktop + XRDP (FIXED)
+      - name: Install LXDE Desktop + XRDP
         run: |
-          sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11
+          sudo apt-get install -y lxde-core lxterminal xrdp dbus-x11
 
-          # FIX: Proper XFCE session config
-          echo "xfce4-session" > ~/.xsession
-          sudo cp ~/.xsession /etc/skel/.xsession
+          # Clean XRDP startup (IMPORTANT FIX)
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
+#!/bin/sh
+unset DBUS_SESSION_BUS_ADDRESS
+unset XDG_RUNTIME_DIR
+exec startlxde
+EOF'
 
-          # FIX: XRDP startwm.sh configuration
-          sudo sed -i 's/^test -x/#&/' /etc/xrdp/startwm.sh
-          sudo sed -i 's/^exec/#&/' /etc/xrdp/startwm.sh
-          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
-
-          # FIX: Add xrdp user to ssl-cert
-          sudo adduser xrdp ssl-cert
+          sudo chmod +x /etc/xrdp/startwm.sh
 
           # Restart XRDP
+          sudo systemctl daemon-reexec
+          sudo systemctl enable xrdp
           sudo systemctl restart xrdp
 
-          # Allow port
+          # Fix permission
+          sudo adduser xrdp ssl-cert
+
+          # Open port
           sudo ufw allow 3389 || true
 
-      - name: Create User
+      - name: Create RDP User
         run: |
           PASSWORD=$(openssl rand -base64 16)
 
@@ -63,23 +66,26 @@ jobs:
           done
 
           if [ -z "$TS_IP" ]; then
-            echo "No Tailscale IP"
+            echo "❌ Failed to get Tailscale IP"
             exit 1
           fi
 
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Show Access Info
+      - name: Show RDP Info
         run: |
-          echo "========== RDP =========="
-          echo "IP: $TAILSCALE_IP"
-          echo "User: $RDP_USER"
-          echo "Pass: $RDP_PASS"
-          echo "========================="
+          echo ""
+          echo "=========== LINUX RDP ==========="
+          echo "IP       : $TAILSCALE_IP"
+          echo "Port     : 3389"
+          echo "Username : $RDP_USER"
+          echo "Password : $RDP_PASS"
+          echo "================================="
+          echo ""
 
-      - name: Keep Alive
+      - name: Keep Session Alive
         run: |
           while true; do
-            echo "RDP running..."
+            echo "[$(date)] RDP running..."
             sleep 300
           done
