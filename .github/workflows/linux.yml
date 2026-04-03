@@ -1,4 +1,4 @@
-name: Linux RDP (Clean & Stable)
+name: Linux RDP (Professional)
 
 on:
   workflow_dispatch:
@@ -14,25 +14,24 @@ jobs:
           sudo apt-get update -y
           sudo apt-get upgrade -y
 
-      - name: Install XFCE Desktop and XRDP
+      - name: Install MATE Desktop + XRDP
         run: |
-          sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11
+          sudo apt-get install -y ubuntu-mate-core xrdp dbus-x11
 
-          # Fix XRDP startup
+          # Set MATE session for XRDP (VERY IMPORTANT FIX)
           echo '#!/bin/sh' | sudo tee /etc/xrdp/startwm.sh
-          echo 'unset DBUS_SESSION_BUS_ADDRESS' | sudo tee -a /etc/xrdp/startwm.sh
-          echo 'unset XDG_RUNTIME_DIR' | sudo tee -a /etc/xrdp/startwm.sh
-          echo 'startxfce4' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'export XDG_SESSION_TYPE=x11' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'export DESKTOP_SESSION=mate' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'export XDG_CURRENT_DESKTOP=MATE' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'exec mate-session' | sudo tee -a /etc/xrdp/startwm.sh
 
           sudo chmod +x /etc/xrdp/startwm.sh
 
-          # Restart XRDP
-          sudo systemctl restart xrdp
+          # Fix permissions
           sudo adduser xrdp ssl-cert
 
-      - name: Improve UI (Theme)
-        run: |
-          sudo apt-get install -y arc-theme papirus-icon-theme
+          # Restart XRDP
+          sudo systemctl restart xrdp
 
       - name: Create RDP User
         run: |
@@ -43,7 +42,8 @@ jobs:
           echo "$USER:$PASS" | sudo chpasswd
           sudo usermod -aG sudo $USER
 
-          echo "startxfce4" | sudo tee /home/$USER/.xsession
+          # Set MATE session for user
+          echo "mate-session" | sudo tee /home/$USER/.xsession
           sudo chown $USER:$USER /home/$USER/.xsession
 
           echo "RDP_USER=$USER" >> $GITHUB_ENV
@@ -63,19 +63,30 @@ jobs:
             sleep 5
           done
 
+          if [ -z "$TS_IP" ]; then
+            echo "Failed to get Tailscale IP"
+            exit 1
+          fi
+
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
 
       - name: Show RDP Info
         run: |
-          echo "=========== RDP ==========="
-          echo "IP: $TAILSCALE_IP"
-          echo "User: $RDP_USER"
-          echo "Pass: $RDP_PASS"
-          echo "==========================="
+          echo "=========== LINUX RDP ==========="
+          echo "IP       : $TAILSCALE_IP"
+          echo "Port     : 3389"
+          echo "Username : $RDP_USER"
+          echo "Password : $RDP_PASS"
+          echo "================================="
+
+      - name: Optimize Performance
+        run: |
+          echo "Disabling animations for better speed"
+          gsettings set org.mate.interface enable-animations false || true
 
       - name: Keep Alive
         run: |
           while true; do
-            echo "RDP running..."
+            echo "[$(date)] RDP running..."
             sleep 300
           done
