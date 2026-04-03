@@ -1,4 +1,4 @@
-name: Linux RDP (Fast & Clean UI)
+name: Linux RDP (Clean & Stable)
 
 on:
   workflow_dispatch:
@@ -14,17 +14,15 @@ jobs:
           sudo apt-get update -y
           sudo apt-get upgrade -y
 
-      - name: Install XFCE (Better UI) + XRDP
+      - name: Install XFCE Desktop and XRDP
         run: |
           sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11
 
           # Fix XRDP startup
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh <<EOF
-#!/bin/sh
-unset DBUS_SESSION_BUS_ADDRESS
-unset XDG_RUNTIME_DIR
-startxfce4
-EOF'
+          echo '#!/bin/sh' | sudo tee /etc/xrdp/startwm.sh
+          echo 'unset DBUS_SESSION_BUS_ADDRESS' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'unset XDG_RUNTIME_DIR' | sudo tee -a /etc/xrdp/startwm.sh
+          echo 'startxfce4' | sudo tee -a /etc/xrdp/startwm.sh
 
           sudo chmod +x /etc/xrdp/startwm.sh
 
@@ -32,32 +30,19 @@ EOF'
           sudo systemctl restart xrdp
           sudo adduser xrdp ssl-cert
 
-      - name: Improve UI Look (Make XFCE look like Ubuntu)
+      - name: Improve UI (Theme)
         run: |
-          # Install themes & icons
           sudo apt-get install -y arc-theme papirus-icon-theme
 
-          # Apply theme globally
-          mkdir -p /home/runner/.config/xfce4/xfconf/xfce-perchannel-xml
-
-          cat > /home/runner/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xsettings" version="1.0">
-  <property name="Net/ThemeName" type="string" value="Arc-Dark"/>
-  <property name="Net/IconThemeName" type="string" value="Papirus"/>
-</channel>
-EOF
-
-      - name: Create User (Simple Password)
+      - name: Create RDP User
         run: |
           USER=rdpuser
-          PASS="rdpuser123#"
+          PASS='rdpuser123#'
 
           sudo useradd -m $USER
           echo "$USER:$PASS" | sudo chpasswd
           sudo usermod -aG sudo $USER
 
-          # Fix session
           echo "startxfce4" | sudo tee /home/$USER/.xsession
           sudo chown $USER:$USER /home/$USER/.xsession
 
@@ -70,12 +55,11 @@ EOF
 
       - name: Connect Tailscale
         run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
-            --hostname=linux-${{ github.run_id }}
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=linux-${{ github.run_id }}
 
           for i in {1..10}; do
             TS_IP=$(tailscale ip -4 2>/dev/null)
-            [ -n "$TS_IP" ] && break
+            if [ ! -z "$TS_IP" ]; then break; fi
             sleep 5
           done
 
@@ -92,6 +76,6 @@ EOF
       - name: Keep Alive
         run: |
           while true; do
-            echo "Running..."
+            echo "RDP running..."
             sleep 300
           done
