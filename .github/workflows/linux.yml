@@ -1,4 +1,4 @@
-name: Linux RDP
+name: Linux RDP (Fixed)
 
 on:
   workflow_dispatch:
@@ -14,28 +14,32 @@ jobs:
           sudo apt-get update -y
           sudo apt-get upgrade -y
 
-      - name: Install Desktop Environment (XFCE) + XRDP
+      - name: Install Desktop + XRDP (FIXED)
         run: |
           sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11
 
-          # Set XFCE as default session
-          echo "startxfce4" > ~/.xsession
+          # FIX: Proper XFCE session config
+          echo "xfce4-session" > ~/.xsession
           sudo cp ~/.xsession /etc/skel/.xsession
 
-          # Start and enable XRDP
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
+          # FIX: XRDP startwm.sh configuration
+          sudo sed -i 's/^test -x/#&/' /etc/xrdp/startwm.sh
+          sudo sed -i 's/^exec/#&/' /etc/xrdp/startwm.sh
+          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
 
-          # Add xrdp user to ssl-cert group (fix black screen issue)
+          # FIX: Add xrdp user to ssl-cert
           sudo adduser xrdp ssl-cert
 
-          # Open firewall port
+          # Restart XRDP
+          sudo systemctl restart xrdp
+
+          # Allow port
           sudo ufw allow 3389 || true
 
-      - name: Create RDP User with Secure Password
+      - name: Create User
         run: |
           PASSWORD=$(openssl rand -base64 16)
-          
+
           sudo useradd -m rdpuser
           echo "rdpuser:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
@@ -43,19 +47,15 @@ jobs:
           echo "RDP_USER=rdpuser" >> $GITHUB_ENV
           echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
 
-          id rdpuser || (echo "User creation failed" && exit 1)
-
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
 
-      - name: Establish Tailscale Connection
+      - name: Connect Tailscale
         run: |
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
-            --hostname=gh-linux-${{ github.run_id }}
+            --hostname=linux-${{ github.run_id }}
 
-          # Wait for IP
-          TS_IP=""
           for i in {1..10}; do
             TS_IP=$(tailscale ip -4 2>/dev/null)
             [ -n "$TS_IP" ] && break
@@ -63,31 +63,23 @@ jobs:
           done
 
           if [ -z "$TS_IP" ]; then
-            echo "Tailscale IP not assigned"
+            echo "No Tailscale IP"
             exit 1
           fi
 
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Verify RDP Port
+      - name: Show Access Info
         run: |
-          echo "Checking RDP port..."
-          nc -zv $TAILSCALE_IP 3389 || echo "Port check skipped (normal on GH runners)"
+          echo "========== RDP =========="
+          echo "IP: $TAILSCALE_IP"
+          echo "User: $RDP_USER"
+          echo "Pass: $RDP_PASS"
+          echo "========================="
 
-      - name: Display RDP Credentials
-        run: |
-          echo ""
-          echo "=========== LINUX RDP ACCESS ==========="
-          echo "Address  : $TAILSCALE_IP"
-          echo "Port     : 3389"
-          echo "Username : $RDP_USER"
-          echo "Password : $RDP_PASS"
-          echo "========================================"
-          echo ""
-
-      - name: Keep Session Alive
+      - name: Keep Alive
         run: |
           while true; do
-            echo "[$(date)] Linux RDP Active..."
+            echo "RDP running..."
             sleep 300
           done
