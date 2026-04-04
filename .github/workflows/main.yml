@@ -61,9 +61,14 @@ jobs:
           export XDG_CONFIG_HOME="$HOME/.config"
           export XDG_CACHE_HOME="$HOME/.cache"
           export XDG_DATA_HOME="$HOME/.local/share"
+          export XDG_RUNTIME_DIR="/tmp/xdg-runtime-$USER_NAME"
 
           unset DBUS_SESSION_BUS_ADDRESS
-          unset XDG_RUNTIME_DIR
+
+          if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+            mkdir -p "$XDG_RUNTIME_DIR"
+            chmod 700 "$XDG_RUNTIME_DIR"
+          fi
 
           mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$HOME/.config/caja"
 
@@ -71,7 +76,7 @@ jobs:
             . "$HOME/.profile"
           fi
 
-          exec dbus-launch --exit-with-session mate-session
+          exec dbus-run-session -- mate-session
           EOF
 
           echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config >/dev/null
@@ -141,13 +146,11 @@ jobs:
 
       - name: Optimize Desktop
         run: |
-          sudo -iu "$RDP_USER" bash -lc '
-            export HOME="/home/$RDP_USER"
-            export XDG_RUNTIME_DIR="/tmp/xdg-runtime-$RDP_USER"
+          sudo -u "$RDP_USER" env HOME="/home/$RDP_USER" XDG_RUNTIME_DIR="/tmp/xdg-runtime-$RDP_USER" bash -lc '
             mkdir -p "$XDG_RUNTIME_DIR"
             chmod 700 "$XDG_RUNTIME_DIR"
-            dbus-launch --exit-with-session gsettings set org.mate.interface enable-animations false || true
-            dbus-launch --exit-with-session gsettings set org.mate.Marco.general compositing-manager false || true
+            dbus-run-session -- gsettings set org.mate.interface enable-animations false || true
+            dbus-run-session -- gsettings set org.mate.Marco.general compositing-manager false || true
           '
 
       - name: Show RDP Info
