@@ -1,172 +1,101 @@
-name: Linux RDP (Professional Main)
+name: RDP Main
 
 on:
   workflow_dispatch:
 
 jobs:
-  linux-rdp:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      RDP_USER: murshidm
-      RDP_PASS: Hacker123#
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
 
     steps:
-      - name: Update Package Index
-        run: sudo apt-get update -y
-
-      - name: Install Desktop, XRDP, and Tools
+      - name: Configure Core RDP Settings
         run: |
-          sudo apt-get install -y \
-            ubuntu-mate-core \
-            mate-terminal \
-            xrdp \
-            xorgxrdp \
-            dbus-x11 \
-            x11-xserver-utils \
-            net-tools \
-            curl
+          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
 
-      - name: Configure XRDP Session
+          # Remove any existing rule with the same name to avoid duplication
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          
+          # For testing, allow any incoming connection on port 3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+
+          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User with Secure Password
         run: |
-          sudo tee /etc/xrdp/startwm.sh >/dev/null <<'EOF'
-          #!/bin/sh
-          set -eu
-
-          if [ -r /etc/profile ]; then
-            . /etc/profile
-          fi
-
-          USER_NAME="${LOGNAME:-${USER:-}}"
-          if [ -z "$USER_NAME" ]; then
-            echo "XRDP user not found"
-            exit 1
-          fi
-
-          USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
-          if [ -z "$USER_HOME" ]; then
-            echo "XRDP home directory not found for $USER_NAME"
-            exit 1
-          fi
-
-          export USER="$USER_NAME"
-          export LOGNAME="$USER_NAME"
-          export HOME="$USER_HOME"
-          export SHELL="/bin/bash"
-          export LANG="en_US.UTF-8"
-          export XDG_SESSION_TYPE="x11"
-          export DESKTOP_SESSION="mate"
-          export XDG_CURRENT_DESKTOP="MATE"
-          export XDG_CONFIG_HOME="$HOME/.config"
-          export XDG_CACHE_HOME="$HOME/.cache"
-          export XDG_DATA_HOME="$HOME/.local/share"
-          export XDG_RUNTIME_DIR="/tmp/xdg-runtime-$USER_NAME"
-
-          unset DBUS_SESSION_BUS_ADDRESS
-
-          if [ ! -d "$XDG_RUNTIME_DIR" ]; then
-            mkdir -p "$XDG_RUNTIME_DIR"
-            chmod 700 "$XDG_RUNTIME_DIR"
-          fi
-
-          mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$HOME/.config/caja"
-
-          if [ -r "$HOME/.profile" ]; then
-            . "$HOME/.profile"
-          fi
-
-          exec dbus-run-session -- mate-session
-          EOF
-
-          echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config >/dev/null
-          sudo chmod 755 /etc/xrdp/startwm.sh
-          sudo adduser xrdp ssl-cert
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
-
-      - name: Create RDP User
-        run: |
-          if ! id -u "$RDP_USER" >/dev/null 2>&1; then
-            sudo useradd -m -s /bin/bash "$RDP_USER"
-          fi
-
-          echo "$RDP_USER:$RDP_PASS" | sudo chpasswd
-          sudo usermod -aG sudo "$RDP_USER"
-
-          sudo install -d -m 700 -o "$RDP_USER" -g "$RDP_USER" "/home/$RDP_USER/.config"
-          sudo install -d -m 700 -o "$RDP_USER" -g "$RDP_USER" "/home/$RDP_USER/.config/caja"
-          sudo install -d -m 700 -o "$RDP_USER" -g "$RDP_USER" "/home/$RDP_USER/.cache"
-          sudo install -d -m 700 -o "$RDP_USER" -g "$RDP_USER" "/home/$RDP_USER/.local/share"
-
-          sudo tee "/home/$RDP_USER/.xsession" >/dev/null <<'EOF'
-          mate-session
-          EOF
-          sudo tee "/home/$RDP_USER/.xsessionrc" >/dev/null <<'EOF'
-          export XDG_SESSION_TYPE=x11
-          export DESKTOP_SESSION=mate
-          export XDG_CURRENT_DESKTOP=MATE
-          export XDG_CONFIG_HOME="$HOME/.config"
-          export XDG_CACHE_HOME="$HOME/.cache"
-          export XDG_DATA_HOME="$HOME/.local/share"
-          EOF
-
-          sudo chown "$RDP_USER:$RDP_USER" "/home/$RDP_USER/.xsession" "/home/$RDP_USER/.xsessionrc"
-          sudo chmod 600 "/home/$RDP_USER/.xsession" "/home/$RDP_USER/.xsessionrc"
-
-          echo "RDP_PASS=$RDP_PASS" >> "$GITHUB_ENV"
-
-      - name: Validate XRDP
-        run: |
-          sudo systemctl --no-pager --full status xrdp
-          sudo ss -ltnp | grep ':3389'
+          Add-Type -AssemblyName System.Security
+          $password = "Hacker123#"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
+          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
 
       - name: Install Tailscale
-        run: curl -fsSL https://tailscale.com/install.sh | sh
-
-      - name: Connect Tailscale
         run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=linux-${{ github.run_id }}
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
 
-          for i in {1..12}; do
-            TS_IP="$(sudo tailscale ip -4 2>/dev/null | head -n 1)"
-            if [ -n "$TS_IP" ]; then
-              break
-            fi
-            sleep 5
-          done
-
-          if [ -z "$TS_IP" ]; then
-            echo "Failed to get Tailscale IP"
-            sudo tailscale status || true
-            exit 1
-          fi
-
-          echo "TAILSCALE_IP=$TS_IP" >> "$GITHUB_ENV"
-
-      - name: Optimize Desktop
+      - name: Establish Tailscale Connection
         run: |
-          sudo -u "$RDP_USER" env HOME="/home/$RDP_USER" XDG_RUNTIME_DIR="/tmp/xdg-runtime-$RDP_USER" bash -lc '
-            mkdir -p "$XDG_RUNTIME_DIR"
-            chmod 700 "$XDG_RUNTIME_DIR"
-            dbus-run-session -- gsettings set org.mate.interface enable-animations false || true
-            dbus-run-session -- gsettings set org.mate.Marco.general compositing-manager false || true
-          '
-
-      - name: Show RDP Info
+          # Bring up Tailscale with the provided auth key and set a unique hostname
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          # Wait for Tailscale to assign an IP
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+      
+      - name: Verify RDP Accessibility
         run: |
-          echo "=========== LINUX RDP ==========="
-          echo "IP       : $TAILSCALE_IP"
-          echo "Port     : 3389"
-          echo "Username : $RDP_USER"
-          echo "Password : $RDP_PASS"
-          echo "Desktop  : MATE over XRDP"
-          echo "Timeout  : 360 minutes max on GitHub-hosted runners"
-          echo "================================="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          
+          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
+          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
 
-      - name: Keep Alive
+      - name: Maintain Connection
         run: |
-          while true; do
-            echo "[$(date)] RDP running..."
-            sleep 300
-          done
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: RDP"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "==================`n"
+          
+          # Keep runner active indefinitely (or until manually cancelled)
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Start-Sleep -Seconds 300
+          }
