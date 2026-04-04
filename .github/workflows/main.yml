@@ -1,4 +1,4 @@
-name: Linux RDP (Professional)
+name: Linux RDP (Professional Main)
 
 on:
   workflow_dispatch:
